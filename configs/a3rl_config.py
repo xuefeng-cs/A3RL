@@ -1,5 +1,4 @@
 from configs import sac_priority_config
-# eventually sac_priority_config once SACLearnerPriority works
 
 def get_config():
     config = sac_priority_config.get_config()

@@ -31,6 +31,10 @@ flags.DEFINE_string("group_name", "default_group_name", "wandb group name.")
 flags.DEFINE_string("run_name", "default_run_name", "wandb run name.")
 flags.DEFINE_string("env_name", "mujoco/halfcheetah/expert-v0", "D4rl dataset name.")
 flags.DEFINE_float("offline_ratio", 0.5, "Offline ratio.")
+flags.DEFINE_float("h_beta_0", 0.4, "initial beta_0 for bias annealing")
+flags.DEFINE_float("h_alpha", 0.3, "priority exponentiation")
+flags.DEFINE_float("h_lambda", 1, "advantage weight")
+flags.DEFINE_float("epsilon", 1e-10, "epsilon pad")
 flags.DEFINE_integer("seed", 42, "Random seed.")
 flags.DEFINE_integer("eval_episodes", 10, "Number of episodes used for evaluation.")
 flags.DEFINE_integer("log_interval", 1000, "Logging interval.")
@@ -40,8 +44,9 @@ flags.DEFINE_integer("utd_ratio", 20, "Update to data ratio.")
 flags.DEFINE_integer("max_steps", 300000, "Number of training steps.")
 flags.DEFINE_integer("start_training", 5000, "Number of training steps to start training.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
-flags.DEFINE_boolean("checkpoint_model", False, "Save agent checkpoint on evaluation.")
-flags.DEFINE_boolean("checkpoint_buffer", False, "Save agent replay buffer on evaluation.")
+flags.DEFINE_boolean("checkpoint_model", True, "Save agent checkpoint on evaluation.")
+flags.DEFINE_boolean("checkpoint_buffer", True, "Save agent replay buffer on evaluation.")
+flags.DEFINE_boolean("use_advantage", False, "whether to use advantage or TD error")
 
 config_flags.DEFINE_config_file(
     "config",
@@ -81,7 +86,9 @@ def main(_):
     
     x = jnp.ones((1000, 1000))
     print(f'Starting run {FLAGS.run_name} in group {FLAGS.group_name} in project {FLAGS.project_name} with seed {FLAGS.seed} with device {x.device}')
-    print(f'Some flags: critic_layer_norm: {FLAGS.config.critic_layer_norm}, num_min_qs: {FLAGS.config.num_min_qs}, num_qs: {FLAGS.config.num_qs}')
+    print(f'Some flags: critic_layer_norm: {FLAGS.config.critic_layer_norm}, num_min_qs: {FLAGS.config.num_min_qs}, num_qs: {FLAGS.config.num_qs}, use_advantage: {FLAGS.use_advantage}, beta_0: {FLAGS.h_beta_0}, alpha: {FLAGS.h_alpha}, lambda: {FLAGS.h_lambda}, seed: {FLAGS.seed}, utd_ratio: {FLAGS.utd_ratio}, batch_size: {FLAGS.batch_size}')
+    
+    print('***\n'*3 + f'env_name: {FLAGS.env_name}\n' + '***\n'*3)
     exp_prefix = FLAGS.run_name
 
     log_dir = os.path.join(FLAGS.log_dir, exp_prefix)

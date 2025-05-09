@@ -222,7 +222,7 @@ class SACLearnerPriority(Agent):
         policy_dist = self.actor.apply_fn(
             {"params": self.actor.params}, batch["observations"]
         )
-        sampled_actions = policy_dist.sample(sample_shape=(20,), seed=key2)
+        sampled_actions = policy_dist.sample(sample_shape=(100,), seed=key2)
         sampled_qs = jax.vmap(
             lambda batch_actions: self.target_critic.apply_fn(
                 {"params": target_params},
@@ -249,8 +249,7 @@ class SACLearnerPriority(Agent):
         dist = self.actor.apply_fn(
             {"params": self.actor.params}, batch["next_observations"]
         )
-        num_samples = 20
-        next_actions = dist.sample(seed=key, sample_shape=(num_samples,))
+        next_actions = dist.sample(seed=key, sample_shape=(100,))
         sampled_qs = jax.vmap(
             lambda batch_actions: self.target_critic.apply_fn(
                 {"params": target_params},
