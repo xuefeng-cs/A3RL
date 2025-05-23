@@ -53,9 +53,9 @@ class MinariDataset(Dataset):
                 dataset_truncations.extend(episode.truncations)
             
             p = 1    
-            if "simple" in dataset_id:
+            if ("simple" in dataset_id or "human" in dataset_id):
                 p = p_simple
-            elif "medium" in dataset_id:
+            elif ("medium" in dataset_id or "cloned" in dataset_id):
                 p = p_medium
             elif "expert" in dataset_id:
                 p = p_expert

@@ -33,21 +33,23 @@ flags.DEFINE_string("env_core", "halfcheetah", "Environment name")
 flags.DEFINE_string("env_name", "halfcheetah_1_1_1", "Name of mixture of datasets")
 
 flags.DEFINE_float("offline_ratio", 0.5, "Offline ratio.")
-flags.DEFINE_float("h_beta_0", 0.4, "initial beta_0 for bias annealing")
+flags.DEFINE_float("h_beta_i", 0.4, "initial beta_0 for bias annealing")
+flags.DEFINE_float("h_beta_f", 1, "final beta_0 for bias annealing")
 flags.DEFINE_float("h_alpha", 0.3, "priority exponentiation")
+flags.DEFINE_float("density_temperature", 5, "density temperature")
 flags.DEFINE_float("h_alpha_final_p", 1.0, "final priority exponentiation proportional constant")
 flags.DEFINE_float("h_lambda", 1.0, "advantage weight")
 flags.DEFINE_float("epsilon", 1e-5, "epsilon pad")
 flags.DEFINE_string("heuristics", "adv", "none, adv, td")
 flags.DEFINE_boolean("use_density", True, "density correction")
-flags.DEFINE_boolean("use_interweave", False, "Interweave A3RL with RLPD")
+flags.DEFINE_boolean("use_alternate", False, "Alternate between A3RL and RLPD.")
 flags.DEFINE_integer("seed", 42, "Random seed.")
-flags.DEFINE_integer("interweave_a3rl", 5, "Chunk of interweave for a3rl")
-flags.DEFINE_integer("interweave_rlpd", 5, "Chunk of interweave for rlpd")
+flags.DEFINE_integer("steps_a3rl", 5, "Steps of a3rl")
+flags.DEFINE_integer("steps_rlpd", 5, "Steps of rlpd")
 
-flags.DEFINE_float("p_simple", 0.5, "Chunk of interweave for a3rl")
-flags.DEFINE_float("p_medium", 0.1, "Chunk of interweave for a3rl")
-flags.DEFINE_float("p_expert", 0.1, "Chunk of interweave for a3rl")
+flags.DEFINE_float("p_simple", 0.5, "Proportion of simple dataset mixed in.")
+flags.DEFINE_float("p_medium", 0.1, "Proportion of medium dataset mixed in")
+flags.DEFINE_float("p_expert", 0.1, "Proportion of expert dataset mixed in")
 
 
 flags.DEFINE_integer("eval_episodes", 20, "Number of episodes used for evaluation.")
@@ -56,7 +58,7 @@ flags.DEFINE_integer("eval_interval", 5000, "Eval interval.")
 flags.DEFINE_integer("batch_size", 256, "Mini batch size.")
 flags.DEFINE_integer("utd_ratio", 20, "Update to data ratio.")
 flags.DEFINE_integer("max_steps", 300000, "Number of training steps.")
-flags.DEFINE_integer("pretrain_steps", 20000, "Number of offline updates.")
+# flags.DEFINE_integer("pretrain_steps", 20000, "Number of offline updates.")
 flags.DEFINE_integer("start_a3rl", 100000, "Number of training steps to start running a3rl.")
 flags.DEFINE_boolean("tqdm", True, "Use tqdm progress bar.")
 flags.DEFINE_boolean("checkpoint_model", True, "Save agent checkpoint on evaluation.")
@@ -101,14 +103,16 @@ def main(_):
                resume="allow")
     config_dict = {key: round(FLAGS[key].value, 6) if isinstance(FLAGS[key].value, float) else FLAGS[key].value for key in FLAGS}
 
-    wandb.config.update(FLAGS, allow_val_change=True)
+    wandb.config.update(config_dict, allow_val_change=True)
     
     x = jnp.ones((1000, 1000))
     exp_prefix = FLAGS.run_name
     log_dir = os.path.join(FLAGS.log_dir, exp_prefix)
     
     print('***\n'*3 + f'Starting run {FLAGS.run_name} in group {FLAGS.group_name} in project {FLAGS.project_name} with seed {FLAGS.seed} with device {x.device}' + '***\n'*3)
-    print(f'Some flags: critic_layer_norm: {FLAGS.config.critic_layer_norm}, num_min_qs: {FLAGS.config.num_min_qs}, num_qs: {FLAGS.config.num_qs}, offline_ratio: {FLAGS.offline_ratio}, heuristics: {FLAGS.heuristics}, use_density: {FLAGS.use_density}, beta_0: {FLAGS.h_beta_0}, alpha: {FLAGS.h_alpha}, lambda: {FLAGS.h_lambda}, seed: {FLAGS.seed}, utd_ratio: {FLAGS.utd_ratio}, batch_size: {FLAGS.batch_size}' + '***\n'*3)
+    
+    print(f'Some flags: critic_layer_norm: {FLAGS.config.critic_layer_norm}, num_min_qs: {FLAGS.config.num_min_qs}, num_qs: {FLAGS.config.num_qs}, offline_ratio: {FLAGS.offline_ratio}, heuristics: {FLAGS.heuristics}, use_density: {FLAGS.use_density}, h_beta_i: {FLAGS.h_beta_i}, h_beta_f: {FLAGS.h_beta_f}, alpha: {FLAGS.h_alpha}, lambda: {FLAGS.h_lambda}, seed: {FLAGS.seed}, utd_ratio: {FLAGS.utd_ratio}, batch_size: {FLAGS.batch_size}' + '***\n'*3)
+    
     print(f'env_name: {FLAGS.env_name}, log_dir: {log_dir}\n' + '***\n'*3)
     
     if FLAGS.checkpoint_model:
@@ -250,10 +254,10 @@ def main(_):
         offline_batch = {}
         online_batch = {}
         density_correction = jnp.zeros((N,))
-        if FLAGS.offline_ratio == 0.0:
+        if FLAGS.offline_ratio == 1.0:
             # * fully offline learning
             batch = ds.sample(N)
-        elif FLAGS.offline_ratio == 1.0:
+        elif FLAGS.offline_ratio == 0.0:
             # * fully online learning
             batch = replay_buffer.sample(N)
         else:
@@ -270,15 +274,15 @@ def main(_):
 
         
         log_info = {}
-        interweave_interval = FLAGS.interweave_a3rl + FLAGS.interweave_rlpd
-        use_interweave_and_in_a3rl = FLAGS.use_interweave and (i % interweave_interval >= 0) and (i % interweave_interval <= FLAGS.interweave_a3rl - 1)
-        if ((i > FLAGS.start_a3rl) and (FLAGS.use_density or FLAGS.heuristics != "none") and (use_interweave_and_in_a3rl or (not FLAGS.use_interweave))):
+        interval_length = FLAGS.steps_a3rl + FLAGS.steps_rlpd
+        use_alternate_and_in_a3rl = FLAGS.use_alternate and (i % interval_length >= 0) and (i % interval_length <= FLAGS.steps_a3rl - 1)
+        if ((i > FLAGS.start_a3rl) and (FLAGS.use_density or FLAGS.heuristics != "none") and (use_alternate_and_in_a3rl or (not FLAGS.use_alternate))):
             # run A3RL: with density or some heuristics. can't run without both.
             if FLAGS.use_density:
                 offline_dens = agent.get_density(offline_batch)
-                log_offline_dens = jnp.log(offline_dens + 1e-5)
-                log_online_dens = jnp.log(1e-5)
-                density_correction = combine({"dens": log_offline_dens}, {"dens": jnp.zeros(log_online_dens.shape)})["dens"]
+                normalized_offline_dens = jax.nn.softmax(jnp.log(offline_dens + 1e-5)/FLAGS.density_temperature)
+                log_offline_dens = jnp.log(normalized_offline_dens)
+                density_correction = combine({"dens": log_offline_dens}, {"dens": jnp.zeros(log_offline_dens.shape)})["dens"]
                 log_info.update({
                     "log_off_dens_max": jnp.max(log_offline_dens),
                     "log_off_dens_min": jnp.min(log_offline_dens),
@@ -310,7 +314,7 @@ def main(_):
             kl = -jnp.log(N) - jnp.sum(jnp.log(Prob))/N
             
             # * annealing
-            beta = FLAGS.h_beta_0 + i/FLAGS.max_steps * (1 - FLAGS.h_beta_0)
+            beta = FLAGS.h_beta_i + i/FLAGS.max_steps * (FLAGS.h_beta_f - FLAGS.h_beta_i)
             importance_sampling_weights = (1/N * 1/Prob) ** beta
             log_info.update({
                 "score_max": jnp.max(score),
@@ -328,7 +332,6 @@ def main(_):
                                                 N,
                                                 shape=(N,),
                                                 p=Prob, replace=True)
-
             batch = {k: v[sampled_indices] for k, v in batch.items()}
             importance_sampling_weights = importance_sampling_weights[sampled_indices]
             # sum to utd_ratio
